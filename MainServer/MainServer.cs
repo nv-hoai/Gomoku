@@ -32,11 +32,7 @@ public class MainServer
     private readonly RSAParameters serverPrivateKey;
 
     // Database services
-    private readonly GomokuDbContext dbContext;
-    private readonly UserService userService;
-    private readonly PlayerProfileService profileService;
-    private readonly GameHistoryService gameHistoryService;
-    private readonly FriendshipService friendshipService;
+    private readonly DbContextOptions<GomokuDbContext> dbOptions;
 
     private readonly int port;
     private readonly int workerPort;
@@ -60,17 +56,14 @@ public class MainServer
         serverPrivateKey = serverRsa.ExportParameters(true);  // Public + Private key
         Console.WriteLine("RSA key pair generated for secure communication");
 
-        // Initialize database context
+        // Initialize database context with pooling support
         var optionsBuilder = new DbContextOptionsBuilder<GomokuDbContext>();
         optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=GomokuGameDB;Trusted_Connection=True;MultipleActiveResultSets=true");
+        optionsBuilder.EnableServiceProviderCaching(false); // Allow multiple instances
         
-        dbContext = new GomokuDbContext(optionsBuilder.Options);
+        dbOptions = optionsBuilder.Options;
         
-        // Initialize services
-        profileService = new PlayerProfileService(dbContext);
-        userService = new UserService(dbContext);
-        gameHistoryService = new GameHistoryService(dbContext);
-        friendshipService = new FriendshipService(dbContext);
+        Console.WriteLine("Database context configured with thread-safe pooling");
     }
 
     public async Task StartAsync()
@@ -584,15 +577,19 @@ public class MainServer
                     }
 
                     // For AI games, record with null Player2Id and mark IsAIGame=true
-                    var aiGameResult = await gameHistoryService.RecordAIGameAsync(
-                        player1ProfileId,
-                        winnerProfileId,
-                        reason,
-                        totalMoves,
-                        gameDurationSeconds,
-                        gameMode);
-                    
-                    Console.WriteLine($"AI game recorded: Player1={player1ProfileId}, Winner={winnerProfileId}, Reason={reason}");
+                    using (var context = new GomokuDbContext(dbOptions))
+                    {
+                        var service = new GameHistoryService(context);
+                        var aiGameResult = await service.RecordAIGameAsync(
+                            player1ProfileId,
+                            winnerProfileId,
+                            reason,
+                            totalMoves,
+                            gameDurationSeconds,
+                            gameMode);
+                        
+                        Console.WriteLine($"AI game recorded: Player1={player1ProfileId}, Winner={winnerProfileId}, Reason={reason}");
+                    }
                 }
                 else if (player2Client?.AuthenticatedProfile != null)
                 {
@@ -744,52 +741,72 @@ public class MainServer
 
     public async Task<(bool Success, string Message, User? User, PlayerProfile? Profile)> LoginUserAsync(string username, string password)
     {
-        return await userService.LoginAsync(username, password);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new UserService(context);
+        return await service.LoginAsync(username, password);
     }
 
     public async Task<(bool Success, string Message, User? User)> RegisterUserAsync(string username, string password, string email, string playerName)
     {
-        return await userService.RegisterAsync(username, password, email, playerName);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new UserService(context);
+        return await service.RegisterAsync(username, password, email, playerName);
     }
 
     public async Task<PlayerProfile?> GetPlayerProfileAsync(int profileId)
     {
-        return await profileService.GetProfileByIdAsync(profileId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.GetProfileByIdAsync(profileId);
     }
 
     public async Task<PlayerProfile?> GetPlayerProfileByNameAsync(string playerName)
     {
-        return await profileService.GetProfileByNameAsync(playerName);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.GetProfileByNameAsync(playerName);
     }
 
     public async Task<int> GetPlayerRankAsync(int profileId)
     {
-        return await profileService.GetPlayerRankAsync(profileId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.GetPlayerRankAsync(profileId);
     }
 
     public async Task<List<PlayerProfile>> GetLeaderboardAsync(int count)
     {
-        return await profileService.GetTopPlayersByEloAsync(count);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.GetTopPlayersByEloAsync(count);
     }
 
     public async Task<List<PlayerProfile>> SearchPlayersByNameAsync(string searchTerm, int maxResults)
     {
-        return await profileService.SearchPlayersByNameAsync(searchTerm, maxResults);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.SearchPlayersByNameAsync(searchTerm, maxResults);
     }
 
     public async Task<List<GameHistory>> GetPlayerGameHistoryAsync(int profileId, int pageSize)
     {
-        return await gameHistoryService.GetPlayerGamesAsync(profileId, pageSize);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new GameHistoryService(context);
+        return await service.GetPlayerGamesAsync(profileId, pageSize);
     }
 
     public async Task<List<PlayerProfile>> GetFriendsAsync(int profileId)
     {
-        return await friendshipService.GetFriendsAsync(profileId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new FriendshipService(context);
+        return await service.GetFriendsAsync(profileId);
     }
 
     public async Task<List<Friendship>> GetFriendRequestsAsync(int profileId)
     {
-        return await friendshipService.GetPendingRequestsAsync(profileId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new FriendshipService(context);
+        return await service.GetPendingRequestsAsync(profileId);
     }
 
     public async Task<(bool Success, string Message, Friendship? Friendship)> SendFriendRequestAsync(int requesterId, int receiverId)
@@ -799,7 +816,9 @@ public class MainServer
             return (false, "Cannot send friend request to yourself", null);
         }
 
-        var friendship = await friendshipService.SendFriendRequestAsync(requesterId, receiverId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new FriendshipService(context);
+        var friendship = await service.SendFriendRequestAsync(requesterId, receiverId);
         if (friendship != null)
         {
             return (true, "Friend request sent", friendship);
@@ -810,7 +829,10 @@ public class MainServer
 
     public async Task<bool> AcceptFriendRequestAsync(int friendshipId, int receiverId)
     {
-        var friendship = await friendshipService.GetFriendshipByIdAsync(friendshipId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new FriendshipService(context);
+        
+        var friendship = await service.GetFriendshipByIdAsync(friendshipId);
 
         Console.WriteLine($"AcceptFriendRequestAsync: friendshipExists={friendship != null}, receiverCheck={friendship?.FriendId == receiverId}, friendshipStatus={friendship?.Status}");
 
@@ -819,18 +841,21 @@ public class MainServer
             return false;
         }
 
-        return await friendshipService.AcceptFriendRequestAsync(friendshipId);
+        return await service.AcceptFriendRequestAsync(friendshipId);
     }
 
     public async Task<bool> RejectFriendRequestAsync(int friendshipId, int receiverId)
     {
-        var friendship = await friendshipService.GetFriendshipByIdAsync(friendshipId);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new FriendshipService(context);
+        
+        var friendship = await service.GetFriendshipByIdAsync(friendshipId);
         if (friendship == null || friendship.FriendId != receiverId || friendship.Status != "Pending")
         {
             return false;
         }
 
-        return await friendshipService.RejectFriendRequestAsync(friendshipId);
+        return await service.RejectFriendRequestAsync(friendshipId);
     }
 
     public async Task<GameHistory?> RecordGameResultAsync(
@@ -843,79 +868,102 @@ public class MainServer
         TimeSpan gameDuration,
         string gameMode)
     {
-        // For AI games
-        if (isAIGame || !player2ProfileId.HasValue)
+        try
         {
-            return await gameHistoryService.RecordGameAsync(
-                player1ProfileId,
-                player2ProfileId ?? 0,
-                winnerProfileId,
-                gameResult,
-                totalMoves,
-                (int)gameDuration.TotalSeconds,
-                gameMode,
-                0,
-                0);
+            // Create new DbContext instance for this operation to avoid threading issues
+            using (var scopedContext = new GomokuDbContext(dbOptions))
+            {
+                var scopedGameHistory = new GameHistoryService(scopedContext);
+                var scopedProfile = new PlayerProfileService(scopedContext);
+
+                // For AI games
+                if (isAIGame || !player2ProfileId.HasValue)
+                {
+                    return await scopedGameHistory.RecordGameAsync(
+                        player1ProfileId,
+                        player2ProfileId ?? 0,
+                        winnerProfileId,
+                        gameResult,
+                        totalMoves,
+                        (int)gameDuration.TotalSeconds,
+                        gameMode,
+                        0,
+                        0);
+                }
+
+                // For player vs player games - calculate ELO changes
+                var player1 = await scopedProfile.GetProfileByIdAsync(player1ProfileId);
+                var player2 = await scopedProfile.GetProfileByIdAsync(player2ProfileId.Value);
+
+                if (player1 == null || player2 == null)
+                    return null;
+
+                // Simple ELO calculation
+                const int K = 32;
+                double expectedPlayer1 = 1.0 / (1.0 + Math.Pow(10, (player2.Elo - player1.Elo) / 400.0));
+                double expectedPlayer2 = 1.0 - expectedPlayer1;
+
+                double actualPlayer1 = winnerProfileId == null ? 0.5 : (winnerProfileId == player1ProfileId ? 1.0 : 0.0);
+                double actualPlayer2 = winnerProfileId == null ? 0.5 : (winnerProfileId == player2ProfileId ? 1.0 : 0.0);
+
+                int player1EloChange = (int)Math.Round(K * (actualPlayer1 - expectedPlayer1));
+                int player2EloChange = (int)Math.Round(K * (actualPlayer2 - expectedPlayer2));
+
+                // Update player ELOs
+                await scopedProfile.UpdateEloAsync(player1ProfileId, player1.Elo + player1EloChange);
+                await scopedProfile.UpdateEloAsync(player2ProfileId.Value, player2.Elo + player2EloChange);
+
+                // Update game stats
+                await scopedProfile.UpdateGameStatsAsync(player1ProfileId, winnerProfileId == player1ProfileId, winnerProfileId == null);
+                await scopedProfile.UpdateGameStatsAsync(player2ProfileId.Value, winnerProfileId == player2ProfileId, winnerProfileId == null);
+
+                return await scopedGameHistory.RecordGameAsync(
+                    player1ProfileId,
+                    player2ProfileId.Value,
+                    winnerProfileId,
+                    gameResult,
+                    totalMoves,
+                    (int)gameDuration.TotalSeconds,
+                    gameMode,
+                    player1EloChange,
+                    player2EloChange);
+            }
         }
-
-        // For player vs player games - calculate ELO changes
-        var player1 = await profileService.GetProfileByIdAsync(player1ProfileId);
-        var player2 = await profileService.GetProfileByIdAsync(player2ProfileId.Value);
-
-        if (player1 == null || player2 == null)
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error recording game result: {ex.Message}");
             return null;
-
-        // Simple ELO calculation
-        const int K = 32;
-        double expectedPlayer1 = 1.0 / (1.0 + Math.Pow(10, (player2.Elo - player1.Elo) / 400.0));
-        double expectedPlayer2 = 1.0 - expectedPlayer1;
-
-        double actualPlayer1 = winnerProfileId == null ? 0.5 : (winnerProfileId == player1ProfileId ? 1.0 : 0.0);
-        double actualPlayer2 = winnerProfileId == null ? 0.5 : (winnerProfileId == player2ProfileId ? 1.0 : 0.0);
-
-        int player1EloChange = (int)Math.Round(K * (actualPlayer1 - expectedPlayer1));
-        int player2EloChange = (int)Math.Round(K * (actualPlayer2 - expectedPlayer2));
-
-        // Update player ELOs
-        await profileService.UpdateEloAsync(player1ProfileId, player1.Elo + player1EloChange);
-        await profileService.UpdateEloAsync(player2ProfileId.Value, player2.Elo + player2EloChange);
-
-        // Update game stats
-        await profileService.UpdateGameStatsAsync(player1ProfileId, winnerProfileId == player1ProfileId, winnerProfileId == null);
-        await profileService.UpdateGameStatsAsync(player2ProfileId.Value, winnerProfileId == player2ProfileId, winnerProfileId == null);
-
-        return await gameHistoryService.RecordGameAsync(
-            player1ProfileId,
-            player2ProfileId.Value,
-            winnerProfileId,
-            gameResult,
-            totalMoves,
-            (int)gameDuration.TotalSeconds,
-            gameMode,
-            player1EloChange,
-            player2EloChange);
+        }
     }
 
     // ==================== Profile Update Wrapper Methods ====================
 
     public async Task<bool> UpdatePlayerNameAsync(int profileId, string newPlayerName)
     {
-        return await profileService.UpdatePlayerNameAsync(profileId, newPlayerName);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.UpdatePlayerNameAsync(profileId, newPlayerName);
     }
 
     public async Task<bool> UpdateAvatarUrlAsync(int profileId, string newAvatarUrl)
     {
-        return await profileService.UpdateAvatarUrlAsync(profileId, newAvatarUrl);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.UpdateAvatarUrlAsync(profileId, newAvatarUrl);
     }
 
     public async Task<bool> UpdateBioAsync(int profileId, string newBio)
     {
-        return await profileService.UpdateBioAsync(profileId, newBio);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.UpdateBioAsync(profileId, newBio);
     }
 
     public async Task<bool> UpdateStatusAsync(int profileId, bool isOnline)
     {
-        return await profileService.UpdateStatusAsync(profileId, isOnline);
+        using var context = new GomokuDbContext(dbOptions);
+        var service = new PlayerProfileService(context);
+        return await service.UpdateStatusAsync(profileId, isOnline);
     }
 
     // ==================== Encryption Methods ====================
