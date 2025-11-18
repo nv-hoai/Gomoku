@@ -14,6 +14,7 @@ public class GameRoom
     public string CurrentPlayer { get; set; } = "X";
     public bool IsGameActive { get; set; } = false;
     public DateTime LastActivity { get; set; } = DateTime.Now;
+    public DateTime StartTime { get; set; } = DateTime.Now;
     public bool IsAIGame { get; set; } = false;
     public string AISymbol { get; set; } = "O";
 
@@ -72,5 +73,26 @@ public class GameRoom
             Player2 = null;
 
         IsGameActive = false;
+    }
+
+    public string GetPlayer1Name()
+    {
+        if (Player1 is ClientHandler client)
+            return client.AuthenticatedProfile?.PlayerName ?? "Player 1";
+        return "Player 1";
+    }
+
+    public string GetPlayer2Name()
+    {
+        if (IsAIGame)
+            return "AI";
+        if (Player2 is ClientHandler client)
+            return client.AuthenticatedProfile?.PlayerName ?? "Player 2";
+        return "Player 2";
+    }
+
+    public TimeSpan GetGameDuration()
+    {
+        return DateTime.Now - StartTime;
     }
 }

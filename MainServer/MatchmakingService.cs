@@ -103,4 +103,24 @@ public class MatchmakingService
             }
         }
     }
+
+    public int GetActiveGameCount()
+    {
+        return gameRooms.Count(kvp => kvp.Value.IsGameActive);
+    }
+
+    public int GetTotalRoomCount()
+    {
+        return gameRooms.Count;
+    }
+
+    public IEnumerable<GameRoom> GetActiveRooms()
+    {
+        return gameRooms.Values.Where(r => r.IsGameActive).ToList();
+    }
+
+    public IEnumerable<GameRoom> GetAllRooms()
+    {
+        return gameRooms.Values.ToList();
+    }
 }

@@ -37,12 +37,47 @@ public class MainServer
     private readonly int port;
     private readonly int workerPort;
 
+    // Events for UI
+    public event Action<string>? OnLogMessage;
+    public event Action<string, string>? OnWorkerConnected; // workerId, endpoint
+    public event Action<string>? OnWorkerDisconnected; // workerId
+    public event Action<string, WorkerStatus, string>? OnWorkerStatusChanged; // workerId, status, currentTask
+    public event Action<string, int>? OnClientConnected; // clientId, totalClients
+    public event Action<string, int>? OnClientDisconnected; // clientId, totalClients
+    public event Action<int, int, int>? OnServerStats; // totalClients, totalWorkers, activeGames
+    public event Action? OnRoomUpdated; // Trigger when rooms change
+
+    // Public properties for UI
+    public bool IsRunning => isRunning;
+    public int TotalClients => clients.Count;
+    public int TotalWorkers => workers.Count;
+    public int TotalActiveGames => matchmakingService.GetActiveGameCount();
+    public IEnumerable<WorkerConnection> Workers => workers.Values.ToList();
+    public IEnumerable<ClientHandler> Clients => clients.Values.ToList();
+    public IEnumerable<GameRoom> ActiveRooms => matchmakingService.GetActiveRooms();
+
+    public enum WorkerStatus
+    {
+        Idle,
+        ProcessingAI,
+        Busy
+    }
+
     public class WorkerConnection
     {
         public string WorkerId { get; set; } = string.Empty;
         public TcpClient Client { get; set; } = null!;
         public NetworkStream Stream { get; set; } = null!;
         public DateTime LastSeen { get; set; } = DateTime.UtcNow;
+        public WorkerStatus Status { get; set; } = WorkerStatus.Idle;
+        public string CurrentTask { get; set; } = "Idle";
+        public int TasksCompleted { get; set; } = 0;
+    }
+
+    private void Log(string message)
+    {
+        Console.WriteLine(message);
+        OnLogMessage?.Invoke(message);
     }
 
     public MainServer(int port = 5000, int workerPort = 5001)
@@ -54,7 +89,7 @@ public class MainServer
         serverRsa = RSA.Create(2048);
         serverPublicKey = serverRsa.ExportParameters(false);  // Public key only
         serverPrivateKey = serverRsa.ExportParameters(true);  // Public + Private key
-        Console.WriteLine("RSA key pair generated for secure communication");
+        Log("RSA key pair generated for secure communication");
 
         // Initialize database context with pooling support
         var optionsBuilder = new DbContextOptionsBuilder<GomokuDbContext>();
@@ -63,7 +98,7 @@ public class MainServer
         
         dbOptions = optionsBuilder.Options;
         
-        Console.WriteLine("Database context configured with thread-safe pooling");
+        Log("Database context configured with thread-safe pooling");
     }
 
     public async Task StartAsync()
@@ -78,8 +113,8 @@ public class MainServer
         
         isRunning = true;
 
-        Console.WriteLine($"Game Server started on port {port}");
-        Console.WriteLine($"Worker port: {workerPort} - waiting for workers...");
+        Log($"Game Server started on port {port}");
+        Log($"Worker port: {workerPort} - waiting for workers...");
 
         // Listen for workers
         _ = Task.Run(ListenForWorkersAsync);
@@ -99,7 +134,9 @@ public class MainServer
                 var clientHandler = new ClientHandler(tcpClient, this);
                 clients[clientHandler.ClientId] = clientHandler;
 
-                Console.WriteLine($"New client connected: {clientHandler.ClientId}");
+                Log($"New client connected: {clientHandler.ClientId}");
+                OnClientConnected?.Invoke(clientHandler.ClientId, clients.Count);
+                OnServerStats?.Invoke(clients.Count, workers.Count, matchmakingService.GetActiveGameCount());
 
                 // Handle client in background
                 _ = Task.Run(() => clientHandler.HandleClientAsync());
@@ -108,7 +145,7 @@ public class MainServer
             {
                 if (isRunning)
                 {
-                    Console.WriteLine($"Error accepting client: {ex.Message}");
+                    Log($"Error accepting client: {ex.Message}");
                 }
             }
         }
@@ -121,7 +158,7 @@ public class MainServer
             try
             {
                 var workerClient = await workerListener!.AcceptTcpClientAsync();
-                Console.WriteLine($"Worker connected: {workerClient.Client.RemoteEndPoint}");
+                Log($"Worker connected: {workerClient.Client.RemoteEndPoint}");
 
                 // Handle worker in background
                 _ = Task.Run(() => HandleWorkerAsync(workerClient));
@@ -130,7 +167,7 @@ public class MainServer
             {
                 if (isRunning)
                 {
-                    Console.WriteLine($"Error accepting worker: {ex.Message}");
+                    Log($"Error accepting worker: {ex.Message}");
                 }
             }
         }
@@ -174,14 +211,15 @@ public class MainServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Worker error: {ex.Message}");
+            Log($"Worker error: {ex.Message}");
         }
         finally
         {
             if (workerId != null)
             {
                 workers.TryRemove(workerId, out _);
-                Console.WriteLine($"Worker {workerId} disconnected");
+                Log($"Worker {workerId} disconnected");
+                OnWorkerDisconnected?.Invoke(workerId);
             }
             stream?.Close();
             workerClient?.Close();
@@ -219,7 +257,9 @@ public class MainServer
                     };
                     await SendToWorker(stream, ack);
 
-                    Console.WriteLine($"Worker {workerId} registered");
+                    Log($"Worker {workerId} registered");
+                    OnWorkerConnected?.Invoke(workerId, client.Client.RemoteEndPoint?.ToString() ?? "unknown");
+                    OnServerStats?.Invoke(clients.Count, workers.Count, matchmakingService.GetActiveGameCount());
                     return workerId;
 
                 default:
@@ -243,7 +283,7 @@ public class MainServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error processing worker message: {ex.Message}");
+            Log($"Error processing worker message: {ex.Message}");
             return currentWorkerId;
         }
     }
@@ -259,7 +299,7 @@ public class MainServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to send to worker: {ex.Message}");
+            Log($"Failed to send to worker: {ex.Message}");
         }
     }
 
@@ -270,6 +310,11 @@ public class MainServer
 
         try
         {
+            // Update worker status to busy
+            worker.Status = WorkerStatus.ProcessingAI;
+            worker.CurrentTask = $"AI Move (Room: {request.Type})";
+            OnWorkerStatusChanged?.Invoke(worker.WorkerId, worker.Status, worker.CurrentTask);
+
             var tcs = new TaskCompletionSource<WorkerResponse>();
             pendingRequests[request.RequestId] = tcs;
 
@@ -284,15 +329,34 @@ public class MainServer
             if (completedTask == timeoutTask)
             {
                 pendingRequests.TryRemove(request.RequestId, out _);
+                
+                // Reset worker status on timeout
+                worker.Status = WorkerStatus.Idle;
+                worker.CurrentTask = "Idle";
+                OnWorkerStatusChanged?.Invoke(worker.WorkerId, worker.Status, worker.CurrentTask);
+                
                 return null;
             }
 
             cts.Cancel();
+            
+            // Mark worker as idle and increment completed tasks
+            worker.Status = WorkerStatus.Idle;
+            worker.CurrentTask = "Idle";
+            worker.TasksCompleted++;
+            OnWorkerStatusChanged?.Invoke(worker.WorkerId, worker.Status, worker.CurrentTask);
+            
             return await responseTask;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error sending to worker: {ex.Message}");
+            Log($"Error sending to worker: {ex.Message}");
+            
+            // Reset worker status on error
+            worker.Status = WorkerStatus.Idle;
+            worker.CurrentTask = "Error";
+            OnWorkerStatusChanged?.Invoke(worker.WorkerId, worker.Status, worker.CurrentTask);
+            
             return null;
         }
     }
@@ -316,6 +380,8 @@ public class MainServer
 
         room.IsGameActive = true;
         room.LastActivity = DateTime.Now;
+        room.StartTime = DateTime.Now;
+        OnRoomUpdated?.Invoke();
 
         var startMessage = $"GAME_START:{{\"roomId\":\"{room.RoomId}\",\"currentPlayer\":\"{room.CurrentPlayer}\"}}";
 
@@ -325,7 +391,7 @@ public class MainServer
         if (room.Player2 != null)
             await room.Player2.SendMessage(startMessage);
 
-        Console.WriteLine($"Game started in room {room.RoomId}");
+        Log($"Game started in room {room.RoomId}");
 
         // If it's an AI game and human player goes first (X), let them start
         // If AI goes first, make the first AI move
@@ -469,7 +535,7 @@ public class MainServer
                 }
             }
             
-            Console.WriteLine("Worker AI failed, using local AI");
+            Log("Worker AI failed, using local AI");
         }
 
         // Fallback to local AI using SharedLib GomokuAI
@@ -487,7 +553,7 @@ public class MainServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error using GomokuAI: {ex.Message}, falling back to random move");
+            Log($"Error using GomokuAI: {ex.Message}, falling back to random move");
             return GetRandomValidMove(board);
         }
     }
@@ -537,7 +603,8 @@ public class MainServer
         if (room.Player2 != null)
             await room.Player2.SendMessage(endMessage);
 
-        Console.WriteLine($"Game ended in room {room.RoomId}: {reason}");
+        Log($"Game ended in room {room.RoomId}: {reason}");
+        OnRoomUpdated?.Invoke();
 
         // Record game result to database
         try
@@ -588,7 +655,7 @@ public class MainServer
                             gameDurationSeconds,
                             gameMode);
                         
-                        Console.WriteLine($"AI game recorded: Player1={player1ProfileId}, Winner={winnerProfileId}, Reason={reason}");
+                        Log($"AI game recorded: Player1={player1ProfileId}, Winner={winnerProfileId}, Reason={reason}");
                     }
                 }
                 else if (player2Client?.AuthenticatedProfile != null)
@@ -607,13 +674,13 @@ public class MainServer
                         TimeSpan.FromSeconds(gameDurationSeconds),
                         gameMode);
                     
-                    Console.WriteLine($"PvP game recorded: Player1={player1ProfileId}, Player2={player2ProfileId}, Winner={winnerProfileId}");
+                    Log($"PvP game recorded: Player1={player1ProfileId}, Player2={player2ProfileId}, Winner={winnerProfileId}");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error recording game result: {ex.Message}");
+            Log($"Error recording game result: {ex.Message}");
         }
     }
 
@@ -642,7 +709,7 @@ public class MainServer
             // If game is active, the opponent wins by default
             if (room.IsGameActive)
             {
-                Console.WriteLine($"Player {client.PlayerSymbol} left during active game. Player {opponent.PlayerSymbol} wins by default.");
+                Log($"Player {client.PlayerSymbol} left during active game. Player {opponent.PlayerSymbol} wins by default.");
                 
                 // End game with opponent as winner
                 await EndGame(room, opponent, "OPPONENT_LEFT");
@@ -660,7 +727,11 @@ public class MainServer
 
     public void RemoveClient(ClientHandler client)
     {
-        clients.TryRemove(client.ClientId, out _);
+        if (clients.TryRemove(client.ClientId, out _))
+        {
+            OnClientDisconnected?.Invoke(client.ClientId, clients.Count);
+            OnServerStats?.Invoke(clients.Count, workers.Count, matchmakingService.GetActiveGameCount());
+        }
     }
 
     private async Task CleanupRoomsAsync()
@@ -674,7 +745,7 @@ public class MainServer
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error in cleanup task: {ex.Message}");
+                Log($"Error in cleanup task: {ex.Message}");
             }
         }
     }
@@ -686,14 +757,14 @@ public class MainServer
             try
             {
                 var stats = loadBalancer.GetLoadStats();
-                Console.WriteLine($"Load Stats - System: {stats.SystemLoad}%, Games: {stats.GameLoad}%, Level: {stats.LoadLevel}");
-                Console.WriteLine($"Workers connected: {workers.Count}");
+                Log($"Load Stats - System: {stats.SystemLoad}%, Games: {stats.GameLoad}%, Level: {stats.LoadLevel}");
+                Log($"Workers connected: {workers.Count}");
 
                 await Task.Delay(TimeSpan.FromSeconds(30));
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error in load monitoring: {ex.Message}");
+                Log($"Error in load monitoring: {ex.Message}");
             }
         }
     }
@@ -728,12 +799,12 @@ public class MainServer
             }
             else
             {
-                Console.WriteLine("AI couldn't find a valid move - this shouldn't happen!");
+                Log("AI couldn't find a valid move - this shouldn't happen!");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in AI turn: {ex.Message}");
+            Log($"Error in AI turn: {ex.Message}");
         }
     }
 
@@ -834,7 +905,6 @@ public class MainServer
         
         var friendship = await service.GetFriendshipByIdAsync(friendshipId);
 
-        Console.WriteLine($"AcceptFriendRequestAsync: friendshipExists={friendship != null}, receiverCheck={friendship?.FriendId == receiverId}, friendshipStatus={friendship?.Status}");
 
         if (friendship == null || friendship.FriendId != receiverId || friendship.Status != "Pending")
         {
@@ -931,7 +1001,7 @@ public class MainServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error recording game result: {ex.Message}");
+            Log($"Error recording game result: {ex.Message}");
             return null;
         }
     }
@@ -980,11 +1050,50 @@ public class MainServer
         return CryptoUtil.RsaDecrypt(encryptedSessionKey, serverPrivateKey);
     }
 
+    // ==================== Admin Methods for UI ====================
+
+    public void DisconnectWorker(string workerId)
+    {
+        if (workers.TryGetValue(workerId, out var worker))
+        {
+            try
+            {
+                worker.Stream?.Close();
+                worker.Client?.Close();
+                workers.TryRemove(workerId, out _);
+                Log($"Worker {workerId} forcibly disconnected by admin");
+                OnWorkerDisconnected?.Invoke(workerId);
+            }
+            catch (Exception ex)
+            {
+                Log($"Error disconnecting worker {workerId}: {ex.Message}");
+            }
+        }
+    }
+
+    public void DisconnectClient(string clientId)
+    {
+        if (clients.TryGetValue(clientId, out var client))
+        {
+            try
+            {
+                _ = client.Disconnect();
+                clients.TryRemove(clientId, out _);
+                Log($"Client {clientId} forcibly disconnected by admin");
+                OnClientDisconnected?.Invoke(clientId, clients.Count);
+            }
+            catch (Exception ex)
+            {
+                Log($"Error disconnecting client {clientId}: {ex.Message}");
+            }
+        }
+    }
+
     public void Stop()
     {
         isRunning = false;
         tcpListener?.Stop();
         workerListener?.Stop();
-        Console.WriteLine("Server stopped");
+        Log("Server stopped");
     }
 }
