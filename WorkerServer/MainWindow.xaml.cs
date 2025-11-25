@@ -32,7 +32,66 @@ namespace WorkerServerApp
             uptimeTimer.Interval = TimeSpan.FromSeconds(1);
             uptimeTimer.Tick += UptimeTimer_Tick;
 
-            AddLog("Worker Server GUI initialized. Click 'Start Worker' to connect to Main Server.");
+            AddLog("Worker Server GUI initialized.");
+            
+            // Auto-start worker on load
+            Loaded += MainWindow_Loaded;
+        }
+
+        private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Auto-start worker after window is fully loaded
+            await System.Threading.Tasks.Task.Delay(500); // Small delay for UI to settle
+            AddLog("Auto-starting worker...");
+            StartWorker();
+        }
+
+        private async void StartWorker()
+        {
+            try
+            {
+                StartStopButton.IsEnabled = false;
+                UpdateConnectionStatus("Connecting...", Color.FromRgb(241, 196, 15));
+                AddLog("Starting worker server...");
+
+                workerServer = new WorkerServer.WorkerServer();
+                
+                // Subscribe to events
+                workerServer.OnLogMessage += WorkerServer_OnLogMessage;
+                workerServer.OnConnectionChanged += WorkerServer_OnConnectionChanged;
+                workerServer.OnRegistrationChanged += WorkerServer_OnRegistrationChanged;
+                workerServer.OnRequestProcessed += WorkerServer_OnRequestProcessed;
+
+                // Start the worker in background
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    try
+                    {
+                        await workerServer.StartAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            AddLog($"ERROR: {ex.Message}");
+                            ResetToDisconnected();
+                        });
+                    }
+                });
+
+                isRunning = true;
+                connectedAt = DateTime.Now;
+                uptimeTimer?.Start();
+
+                StartStopButton.Content = "⏹ Stop Worker";
+                StartStopButton.Background = new SolidColorBrush(Color.FromRgb(231, 76, 60));
+                StartStopButton.IsEnabled = true;
+            }
+            catch (Exception ex)
+            {
+                AddLog($"ERROR: Failed to start worker - {ex.Message}");
+                ResetToDisconnected();
+            }
         }
 
         private void AddLog(string message)
@@ -101,55 +160,8 @@ namespace WorkerServerApp
         {
             if (!isRunning)
             {
-                // Start worker
-                try
-                {
-                    StartStopButton.IsEnabled = false;
-                    UpdateConnectionStatus("Connecting...", Color.FromRgb(241, 196, 15));
-                    AddLog("Starting worker server...");
-
-                    workerServer = new WorkerServer.WorkerServer();
-                    
-                    // Subscribe to events
-                    workerServer.OnLogMessage += WorkerServer_OnLogMessage;
-                    workerServer.OnConnectionChanged += WorkerServer_OnConnectionChanged;
-                    workerServer.OnRegistrationChanged += WorkerServer_OnRegistrationChanged;
-                    workerServer.OnRequestProcessed += WorkerServer_OnRequestProcessed;
-
-                    // Start the worker in background
-                    _ = System.Threading.Tasks.Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await workerServer.StartAsync();
-                        }
-                        catch (Exception ex)
-                        {
-                            Dispatcher.Invoke(() =>
-                            {
-                                AddLog($"ERROR: {ex.Message}");
-                                MessageBox.Show($"Failed to start worker: {ex.Message}", "Error", 
-                                    MessageBoxButton.OK, MessageBoxImage.Error);
-                                ResetToDisconnected();
-                            });
-                        }
-                    });
-
-                    isRunning = true;
-                    connectedAt = DateTime.Now;
-                    uptimeTimer?.Start();
-
-                    StartStopButton.Content = "⏹ Stop Worker";
-                    StartStopButton.Background = new SolidColorBrush(Color.FromRgb(231, 76, 60));
-                    StartStopButton.IsEnabled = true;
-                }
-                catch (Exception ex)
-                {
-                    AddLog($"ERROR: Failed to start worker - {ex.Message}");
-                    MessageBox.Show($"Failed to start worker: {ex.Message}", "Error", 
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                    ResetToDisconnected();
-                }
+                // Manual start (same as auto-start)
+                StartWorker();
             }
             else
             {

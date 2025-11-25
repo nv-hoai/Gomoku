@@ -318,7 +318,7 @@ public class MainServer
         }
     }
 
-    private async Task<WorkerResponse?> SendRequestToWorker(WorkerRequest request, int timeoutMs = 5000)
+    private async Task<WorkerResponse?> SendRequestToWorker(WorkerRequest request, int timeoutMs = 2000)
     {
         var worker = workers.Values.FirstOrDefault();
         if (worker == null) return null;
@@ -412,7 +412,8 @@ public class MainServer
         // If AI goes first, make the first AI move
         if (room.IsAIGame && room.CurrentPlayer == room.AISymbol)
         {
-            _ = Task.Run(async () => await HandleAITurn(room));
+            // Don't use Task.Run - just fire and forget with async void pattern
+            _ = HandleAITurnAsync(room);
         }
     }
 
@@ -494,7 +495,8 @@ public class MainServer
         // Handle AI turn if it's an AI game and now it's AI's turn
         if (room.IsCurrentPlayerAI())
         {
-            _ = Task.Run(async () => await HandleAITurn(room));
+            // Fire and forget - no need for Task.Run overhead
+            _ = HandleAITurnAsync(room);
         }
 
         return true;
@@ -790,7 +792,7 @@ public class MainServer
         }
     }
 
-    private async Task HandleAITurn(GameRoom room)
+    private async Task HandleAITurnAsync(GameRoom room)
     {
         try
         {
@@ -828,6 +830,9 @@ public class MainServer
             Log($"Error in AI turn: {ex.Message}");
         }
     }
+
+    // Legacy method name for compatibility
+    private async Task HandleAITurn(GameRoom room) => await HandleAITurnAsync(room);
 
     // ==================== Database Service Wrapper Methods ====================
 
