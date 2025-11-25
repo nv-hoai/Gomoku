@@ -1,11 +1,11 @@
 @echo off
-title WorkerServer - Gomoku Worker Server
+title WorkerServer GUI - Gomoku Worker Server
 echo ================================
-echo       Gomoku Worker Server
+echo   Gomoku Worker Server (GUI)
 echo ================================
-echo - Connecting to MainServer at 192.168.195.69 / 192.168.195.126:5001
+echo - Starting WPF GUI Application
+echo - Connects to MainServer at port 5001
 echo - Handles AI calculations and move validation
-echo - Press Ctrl+C to stop
 echo ================================
 echo.
 

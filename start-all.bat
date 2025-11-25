@@ -12,13 +12,13 @@ echo ================================
 pause
 
 echo Starting MainServer...
-start "MainServer" "%~dp0run-server.bat"
+start "MainServer" "%~dp0run-server-gui.bat"
 
 echo Waiting 3 seconds for MainServer to initialize...
 timeout /t 3 /nobreak > nul
 
 echo Starting WorkerServer...
-start "WorkerServer" "%~dp0run-worker.bat"
+start "WorkerServer" "%~dp0run-worker-gui.bat"
 
 echo.
 echo ================================

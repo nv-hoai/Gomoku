@@ -1,0 +1,236 @@
+<Window x:Class="WorkerServerApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Gomoku Worker Server Manager" Height="700" Width="1000"
+        WindowStartupLocation="CenterScreen"
+        Background="#F0F0F0">
+    
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,5,0,5"/>
+            <Setter Property="Foreground" Value="#34495E"/>
+        </Style>
+        
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="15"/>
+            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="#000000" Opacity="0.1" ShadowDepth="2" BlurRadius="8"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="StatCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="#000000" Opacity="0.1" ShadowDepth="2" BlurRadius="8"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    
+    <Grid Margin="15" Background="#F0F0F0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Header with Worker Status -->
+        <Border Grid.Row="0" Style="{StaticResource CardStyle}" Background="#8E44AD" Padding="20" Margin="0,0,0,15">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="12" Height="12" Margin="0,0,10,0">
+                        <Ellipse.Fill>
+                            <SolidColorBrush x:Name="StatusIndicator" Color="#95A5A6"/>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <TextBlock Text="Worker Status: " Foreground="#ECF0F1" FontSize="16"/>
+                    <TextBlock x:Name="StatusText" Text="Disconnected" Foreground="#95A5A6" FontSize="16" FontWeight="Bold"/>
+                    
+                    <Rectangle Width="1" Height="20" Fill="#BDC3C7" Margin="15,0"/>
+                    
+                    <TextBlock Text="Worker ID: " Foreground="#ECF0F1" FontSize="14" Margin="0,0,5,0"/>
+                    <TextBlock x:Name="WorkerIdText" Text="Not Connected" Foreground="#ECF0F1" FontSize="14" FontWeight="Bold"/>
+                </StackPanel>
+                
+                <Button x:Name="StartStopButton" Grid.Column="1" Content="▶ Start Worker" 
+                        Width="130" Height="38" Background="#2ECC71" Foreground="White"
+                        FontWeight="SemiBold" BorderThickness="0" Cursor="Hand"
+                        Click="StartStopButton_Click" VerticalAlignment="Center">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Background="{TemplateBinding Background}" 
+                                                CornerRadius="5" Padding="10,5">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#27AE60"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- Statistics Cards -->
+        <Grid Grid.Row="1" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Total Requests Processed -->
+            <Border Grid.Column="0" Style="{StaticResource StatCardStyle}" Background="#3498DB">
+                <StackPanel>
+                    <TextBlock Text="📊 TOTAL REQUESTS" Foreground="White" FontSize="11" FontWeight="SemiBold" Opacity="0.8"/>
+                    <TextBlock x:Name="TotalRequestsText" Text="0" Foreground="White" FontSize="32" FontWeight="Bold" Margin="0,5,0,0"/>
+                    <TextBlock Text="Processed" Foreground="White" FontSize="10" Opacity="0.7"/>
+                </StackPanel>
+            </Border>
+
+            <!-- AI Requests -->
+            <Border Grid.Column="1" Style="{StaticResource StatCardStyle}" Background="#9B59B6">
+                <StackPanel>
+                    <TextBlock Text="🤖 AI REQUESTS" Foreground="White" FontSize="11" FontWeight="SemiBold" Opacity="0.8"/>
+                    <TextBlock x:Name="AIRequestsText" Text="0" Foreground="White" FontSize="32" FontWeight="Bold" Margin="0,5,0,0"/>
+                    <TextBlock Text="AI Computations" Foreground="White" FontSize="10" Opacity="0.7"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Validation Requests -->
+            <Border Grid.Column="2" Style="{StaticResource StatCardStyle}" Background="#E74C3C">
+                <StackPanel>
+                    <TextBlock Text="✓ VALIDATIONS" Foreground="White" FontSize="11" FontWeight="SemiBold" Opacity="0.8"/>
+                    <TextBlock x:Name="ValidationRequestsText" Text="0" Foreground="White" FontSize="32" FontWeight="Bold" Margin="0,5,0,0"/>
+                    <TextBlock Text="Move Checks" Foreground="White" FontSize="10" Opacity="0.7"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Average Processing Time -->
+            <Border Grid.Column="3" Style="{StaticResource StatCardStyle}" Background="#F39C12">
+                <StackPanel>
+                    <TextBlock Text="⚡ AVG TIME" Foreground="White" FontSize="11" FontWeight="SemiBold" Opacity="0.8"/>
+                    <TextBlock x:Name="AvgProcessingTimeText" Text="0 ms" Foreground="White" FontSize="32" FontWeight="Bold" Margin="0,5,0,0"/>
+                    <TextBlock Text="Processing Speed" Foreground="White" FontSize="10" Opacity="0.7"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+        
+        <!-- Main Content Area -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- Left Panel: Logs -->
+            <Border Grid.Column="0" Style="{StaticResource CardStyle}" Margin="0,0,10,0">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="📋 Worker Activity Logs" Style="{StaticResource SectionHeader}"/>
+                        <Button x:Name="ClearLogsButton" Content="Clear" Width="70" Height="24" 
+                                Margin="10,0,0,0" Click="ClearLogsButton_Click" FontSize="11"/>
+                    </StackPanel>
+                    <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Background="#FAFAFA">
+                        <ListBox x:Name="LogListBox" 
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 FontSize="11"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </DockPanel>
+            </Border>
+            
+            <!-- Right Panel: Connection Info and Performance -->
+            <Border Grid.Column="1" Style="{StaticResource CardStyle}" Margin="10,0,0,0">
+                <DockPanel>
+                    <TextBlock Text="🔌 Connection Info" Style="{StaticResource SectionHeader}" DockPanel.Dock="Top"/>
+                    
+                    <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="15" Margin="0,0,0,15" DockPanel.Dock="Top">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Server Address:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="ServerAddressText" Text="Not Connected" Foreground="#7F8C8D"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Server Port:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="ServerPortText" Text="5001" Foreground="#7F8C8D"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Registration:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="RegistrationStatusText" Text="Not Registered" Foreground="#E74C3C"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Connected At:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="ConnectedAtText" Text="-" Foreground="#7F8C8D"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Uptime:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="UptimeText" Text="00:00:00" Foreground="#7F8C8D"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="📈 Performance Metrics" Style="{StaticResource SectionHeader}" DockPanel.Dock="Top" Margin="0,10,0,5"/>
+                    
+                    <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="15" DockPanel.Dock="Top">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Last Request:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="LastRequestText" Text="-" Foreground="#7F8C8D"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Last AI Time:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="LastAITimeText" Text="-" Foreground="#7F8C8D"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Success Rate:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="SuccessRateText" Text="100%" Foreground="#2ECC71"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,5">
+                                <TextBlock Text="Errors:" FontWeight="SemiBold" Width="120"/>
+                                <TextBlock x:Name="ErrorCountText" Text="0" Foreground="#E74C3C"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
