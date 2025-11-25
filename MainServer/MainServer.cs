@@ -44,6 +44,7 @@ public class MainServer
     public event Action<string, WorkerStatus, string>? OnWorkerStatusChanged; // workerId, status, currentTask
     public event Action<string, int>? OnClientConnected; // clientId, totalClients
     public event Action<string, int>? OnClientDisconnected; // clientId, totalClients
+    public event Action<string, string>? OnClientAuthenticated; // clientId, playerName
     public event Action<int, int, int>? OnServerStats; // totalClients, totalWorkers, activeGames
     public event Action? OnRoomUpdated; // Trigger when rooms change
 
@@ -103,6 +104,20 @@ public class MainServer
 
     public async Task StartAsync()
     {
+        if (isRunning)
+        {
+            Log("Server is already running");
+            return;
+        }
+
+        // Dispose old listeners if they exist
+        try
+        {
+            tcpListener?.Stop();
+            workerListener?.Stop();
+        }
+        catch { }
+
         // Start client listener
         tcpListener = new TcpListener(IPAddress.Any, port);
         tcpListener.Start();
@@ -596,14 +611,17 @@ public class MainServer
         room.IsGameActive = false;
         loadBalancer.DecrementLoad();
 
-        string endMessage = $"GAME_END:{{\"reason\":\"{reason}\",\"winner\":\"{winner?.PlayerSymbol ?? "NONE"}\"}}";
+        // Prepare end message with additional info for client
+        string winnerSymbol = winner?.PlayerSymbol ?? "NONE";
+        string endMessage = $"GAME_END:{{\"reason\":\"{reason}\",\"winner\":\"{winnerSymbol}\"}}";
 
+        // Send GAME_END message to both players
         if (room.Player1 != null)
             await room.Player1.SendMessage(endMessage);
         if (room.Player2 != null)
             await room.Player2.SendMessage(endMessage);
 
-        Log($"Game ended in room {room.RoomId}: {reason}");
+        Log($"Game ended in room {room.RoomId}: {reason}, Winner: {winnerSymbol}");
         OnRoomUpdated?.Invoke();
 
         // Record game result to database
@@ -628,12 +646,12 @@ public class MainServer
                     // AI game: only player1 is recorded
                     player2ProfileId = null;
                     
-                    // Determine winner based on who made the winning move
+                    // Determine winner based on reason and who won
                     if (reason == "DRAW")
                     {
                         winnerProfileId = null; // Draw
                     }
-                    else if (reason == "WIN")
+                    else if (reason == "WIN" || reason == "OPPONENT_LEFT")
                     {
                         winnerProfileId = (winner == room.Player1) ? player1ProfileId : (int?)null;
                     }
@@ -711,15 +729,13 @@ public class MainServer
             {
                 Log($"Player {client.PlayerSymbol} left during active game. Player {opponent.PlayerSymbol} wins by default.");
                 
-                // End game with opponent as winner
+                // End game with opponent as winner - this will send GAME_END to both players
+                // and record the result to database
                 await EndGame(room, opponent, "OPPONENT_LEFT");
-                
-                // Send special message to opponent
-                await opponent.SendMessage("OPPONENT_LEFT:Your opponent left the game. You win!");
             }
             else
             {
-                // Game not active, just notify about leaving
+                // Game not active (waiting for opponent), just notify about leaving
                 await opponent.SendMessage("OPPONENT_LEFT:Your opponent left the game");
             }
         }
@@ -732,6 +748,11 @@ public class MainServer
             OnClientDisconnected?.Invoke(client.ClientId, clients.Count);
             OnServerStats?.Invoke(clients.Count, workers.Count, matchmakingService.GetActiveGameCount());
         }
+    }
+
+    public void NotifyClientAuthenticated(string clientId, string playerName)
+    {
+        OnClientAuthenticated?.Invoke(clientId, playerName);
     }
 
     private async Task CleanupRoomsAsync()
@@ -1091,9 +1112,58 @@ public class MainServer
 
     public void Stop()
     {
+        if (!isRunning) return;
+        
         isRunning = false;
-        tcpListener?.Stop();
-        workerListener?.Stop();
+        
+        // Disconnect all clients
+        foreach (var client in clients.Values.ToList())
+        {
+            try
+            {
+                _ = client.Disconnect();
+            }
+            catch (Exception ex)
+            {
+                Log($"Error disconnecting client: {ex.Message}");
+            }
+        }
+        
+        // Disconnect all workers
+        foreach (var worker in workers.Values.ToList())
+        {
+            try
+            {
+                worker.Client?.Close();
+                worker.Stream?.Close();
+            }
+            catch (Exception ex)
+            {
+                Log($"Error disconnecting worker: {ex.Message}");
+            }
+        }
+        
+        // Stop and dispose listeners
+        try
+        {
+            tcpListener?.Stop();
+            workerListener?.Stop();
+        }
+        catch (Exception ex)
+        {
+            Log($"Error stopping listeners: {ex.Message}");
+        }
+        
         Log("Server stopped");
+    }
+
+    public void ClearAllData()
+    {
+        // Clear all collections
+        clients.Clear();
+        workers.Clear();
+        pendingRequests.Clear();
+        
+        Log("All data cleared");
     }
 }

@@ -37,6 +37,7 @@ namespace MainServerApp
             server.OnWorkerStatusChanged += Server_OnWorkerStatusChanged;
             server.OnClientConnected += Server_OnClientConnected;
             server.OnClientDisconnected += Server_OnClientDisconnected;
+            server.OnClientAuthenticated += Server_OnClientAuthenticated;
             server.OnServerStats += Server_OnServerStats;
             server.OnRoomUpdated += Server_OnRoomUpdated;
 
@@ -160,6 +161,19 @@ namespace MainServerApp
             });
         }
 
+        private void Server_OnClientAuthenticated(string clientId, string playerName)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                var client = clients.FirstOrDefault(c => c.ClientId == clientId);
+                if (client != null)
+                {
+                    client.PlayerName = playerName;
+                    ClientsDataGrid.Items.Refresh();
+                }
+            });
+        }
+
         private void Server_OnServerStats(int totalClients, int totalWorkers, int activeGames)
         {
             Dispatcher.Invoke(() =>
@@ -249,20 +263,45 @@ namespace MainServerApp
             }
         }
 
-        private void StopServerButton_Click(object sender, RoutedEventArgs e)
+        private async void StartStopServerButton_Click(object sender, RoutedEventArgs e)
         {
-            var result = MessageBox.Show(
-                "Are you sure you want to stop the server?",
-                "Confirm Stop",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-
-            if (result == MessageBoxResult.Yes)
+            if (server.IsRunning)
             {
-                server.Stop();
-                StatusText.Text = "Stopped";
-                StatusText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
-                StopServerButton.IsEnabled = false;
+                // Stop server
+                var result = MessageBox.Show(
+                    "Are you sure you want to stop the server?",
+                    "Confirm Stop",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    server.Stop();
+                    
+                    // Wait a bit for server to fully stop
+                    await Task.Delay(100);
+                    
+                    StatusText.Text = "Stopped";
+                    StatusText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
+                    StatusIndicator.Color = System.Windows.Media.Colors.Red;
+                    StartStopServerButton.Content = "▶ Start Server";
+                    StartStopServerButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#2ECC71"));
+                }
+            }
+            else
+            {
+                // Start server
+                ClearAllData();
+                
+                // Update UI immediately to Start state
+                StatusText.Text = "Running";
+                StatusText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Green);
+                StatusIndicator.Color = System.Windows.Media.Colors.Green;
+                StartStopServerButton.Content = "⏹ Stop Server";
+                StartStopServerButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#E74C3C"));
+                
+                // Then start the server
+                await server.StartAsync();
             }
         }
 
@@ -274,6 +313,23 @@ namespace MainServerApp
         private void ClientsDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             DisconnectClientButton.IsEnabled = ClientsDataGrid.SelectedItem != null;
+        }
+
+        private void ClearAllData()
+        {
+            // Clear all collections
+            logs.Clear();
+            workers.Clear();
+            clients.Clear();
+            rooms.Clear();
+            
+            // Reset counters
+            ClientsCountText.Text = "0";
+            WorkersCountText.Text = "0";
+            ActiveGamesText.Text = "0";
+            
+            // Clear server data
+            server.ClearAllData();
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

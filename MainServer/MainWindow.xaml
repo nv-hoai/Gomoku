@@ -86,10 +86,10 @@
                     </StackPanel>
                 </StackPanel>
                 
-                <Button x:Name="StopServerButton" Grid.Column="1" Content="⏹ Stop Server" 
+                <Button x:Name="StartStopServerButton" Grid.Column="1" Content="⏹ Stop Server" 
                         Width="130" Height="38" Background="#E74C3C" Foreground="White"
                         FontWeight="SemiBold" BorderThickness="0" Cursor="Hand"
-                        Click="StopServerButton_Click" VerticalAlignment="Center">
+                        Click="StartStopServerButton_Click" VerticalAlignment="Center">
                     <Button.Style>
                         <Style TargetType="Button">
                             <Setter Property="Template">

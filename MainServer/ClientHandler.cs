@@ -323,6 +323,9 @@ public class ClientHandler : IGamePlayer
 
                 await SendMessage($"LOGIN_SUCCESS:{JsonSerializer.Serialize(responseData)}");
                 Console.WriteLine($"User {user.Username} logged in successfully");
+                
+                // Notify UI that client has authenticated
+                server.NotifyClientAuthenticated(ClientId, profile.PlayerName);
             }
             else
             {
@@ -391,6 +394,9 @@ public class ClientHandler : IGamePlayer
 
             await SendMessage($"LOGOUT_SUCCESS:{JsonSerializer.Serialize(responseData)}");
             Console.WriteLine($"User {AuthenticatedProfile.User.Username} logged out");
+
+            // Notify UI that client has logged out
+            server.NotifyClientAuthenticated(ClientId, "Unknown");
 
             // Clear authentication info
             AuthenticatedUserId = null;
