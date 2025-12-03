@@ -23,15 +23,27 @@ public class WorkerServer
         new IPAddress(new byte[] { 192, 168, 195, 126 }),
     };
 
+    // Events for UI
+    public event Action<string>? OnLogMessage;
+    public event Action<bool, string>? OnConnectionChanged; // isConnected, serverAddress
+    public event Action<bool, string>? OnRegistrationChanged; // isRegistered, workerId
+    public event Action<string, double, bool>? OnRequestProcessed; // requestType, processingTime, success
+
     public WorkerServer()
     {
         this.workerId = Environment.MachineName + "-" + Guid.NewGuid().ToString()[..8];
     }
 
+    private void Log(string message)
+    {
+        Console.WriteLine(message);
+        OnLogMessage?.Invoke(message);
+    }
+
     public async Task StartAsync()
     {
         isRunning = true;
-        Console.WriteLine($"Worker {workerId} starting...");
+        Log($"Worker {workerId} starting...");
 
         while (isRunning)
         {
@@ -49,13 +61,15 @@ public class WorkerServer
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Connection error: {ex.Message}");
+                Log($"Connection error: {ex.Message}");
                 isConnected = false;
-                isRegistered = false; // Reset registration status on connection loss
+                isRegistered = false;
+                OnConnectionChanged?.Invoke(false, "");
+                OnRegistrationChanged?.Invoke(false, workerId);
                 
                 if (isRunning)
                 {
-                    Console.WriteLine("Attempting to reconnect in 5 seconds...");
+                    Log("Attempting to reconnect in 5 seconds...");
                     await Task.Delay(5000);
                 }
             }
@@ -71,16 +85,20 @@ public class WorkerServer
             stream = tcpClient.GetStream();
             isConnected = true;
 
-            Console.WriteLine($"Worker {workerId} connected to MainServer at {iPAddresses[0].ToString()} | {iPAddresses[1].ToString()}:{mainServerPort}");
+            string serverAddress = $"{iPAddresses[0]} | {iPAddresses[1]}:{mainServerPort}";
+            Log($"Worker {workerId} connected to MainServer at {serverAddress}");
+            OnConnectionChanged?.Invoke(true, serverAddress);
 
             // Send registration message
             await RegisterWithMainServerAsync();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to connect to MainServer: {ex.Message}");
+            Log($"Failed to connect to MainServer: {ex.Message}");
             isConnected = false;
-            isRegistered = false; // Reset registration status on connection failure
+            isRegistered = false;
+            OnConnectionChanged?.Invoke(false, "");
+            OnRegistrationChanged?.Invoke(false, workerId);
             tcpClient?.Close();
             tcpClient = null;
             stream = null;
@@ -98,11 +116,11 @@ public class WorkerServer
             };
 
             await SendMessage(registrationRequest);
-            Console.WriteLine($"Worker {workerId} is trying to register with MainServer");
+            Log($"Worker {workerId} is trying to register with MainServer");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to register with MainServer: {ex.Message}");
+            Log($"Failed to register with MainServer: {ex.Message}");
         }
     }
 
@@ -118,7 +136,7 @@ public class WorkerServer
                 int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                 if (bytesRead == 0)
                 {
-                    Console.WriteLine("MainServer disconnected");
+                    Log("MainServer disconnected");
                     break;
                 }
 
@@ -146,18 +164,20 @@ public class WorkerServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error listening for requests: {ex.Message}");
+            Log($"Error listening for requests: {ex.Message}");
         }
         finally
         {
             isConnected = false;
-            isRegistered = false; // Reset registration status when connection is lost
+            isRegistered = false;
+            OnConnectionChanged?.Invoke(false, "");
+            OnRegistrationChanged?.Invoke(false, workerId);
         }
     }
 
     private async Task ProcessRequest(string message)
     {
-        Console.WriteLine($"Received: {message}");
+        Log($"Received: {message.Substring(0, Math.Min(100, message.Length))}...");
 
         try
         {
@@ -225,7 +245,7 @@ public class WorkerServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error processing request: {ex.Message}");
+            Log($"Error processing request: {ex.Message}");
             await SendErrorResponse("", $"Processing error: {ex.Message}");
         }
     }
@@ -240,45 +260,45 @@ public class WorkerServer
             if (acknowledgedWorkerId == workerId)
             {
                 isRegistered = true;
-                Console.WriteLine($"[Worker {workerId}] Registration acknowledged by MainServer");
-                Console.WriteLine($"[Worker {workerId}] Status: Connected and Registered - Ready to process requests");
-                
-                // Optional: Perform any post-registration setup here
-                // For example: update status, initialize additional services, etc.
+                Log($"[Worker {workerId}] Registration acknowledged by MainServer");
+                Log($"[Worker {workerId}] Status: Connected and Registered - Ready to process requests");
+                OnRegistrationChanged?.Invoke(true, workerId);
             }
             else
             {
-                Console.WriteLine($"[Worker {workerId}] Warning: Received acknowledgment for different worker ID: {acknowledgedWorkerId}");
+                Log($"[Worker {workerId}] Warning: Received acknowledgment for different worker ID: {acknowledgedWorkerId}");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Worker {workerId}] Error processing registration acknowledgment: {ex.Message}");
+            Log($"[Worker {workerId}] Error processing registration acknowledgment: {ex.Message}");
         }
     }
 
     private async Task<WorkerResponse> ProcessAIMoveRequest(WorkerRequest request)
     {
         var startTime = DateTime.Now;
+        bool success = false;
         try
         {
-            Console.WriteLine($"[Worker {workerId}] Processing AI request {request.RequestId}");
+            Log($"[Worker {workerId}] Processing AI request {request.RequestId}");
             
             var aiRequest = JsonSerializer.Deserialize<AIRequest>(request.Data);
             if (aiRequest == null)
             {
+                OnRequestProcessed?.Invoke("AI_MOVE_REQUEST", (DateTime.Now - startTime).TotalMilliseconds, false);
                 return CreateErrorResponse(request.RequestId, "Invalid AI request data");
             }
 
             // Convert jagged array to 2D array
             var board2D = ConvertToRectangularArray(aiRequest.Board);
             
-            Console.WriteLine($"[Worker {workerId}] Starting AI calculation for {aiRequest.AISymbol}");
+            Log($"[Worker {workerId}] Starting AI calculation for {aiRequest.AISymbol}");
             var gomokuAI = new GomokuAI(aiRequest.AISymbol);
             var (row, col) = gomokuAI.GetBestMove(board2D);
             
             var elapsed = DateTime.Now - startTime;
-            Console.WriteLine($"[Worker {workerId}] AI calculation completed in {elapsed.TotalMilliseconds}ms");
+            Log($"[Worker {workerId}] AI calculation completed in {elapsed.TotalMilliseconds:F0}ms");
 
             var aiResponse = new AIResponse
             {
@@ -292,6 +312,9 @@ public class WorkerServer
                 aiResponse.ErrorMessage = "No valid moves available";
             }
 
+            success = aiResponse.IsValid;
+            OnRequestProcessed?.Invoke("AI_MOVE_REQUEST", elapsed.TotalMilliseconds, success);
+
             return new WorkerResponse
             {
                 RequestId = request.RequestId,
@@ -303,18 +326,21 @@ public class WorkerServer
         catch (Exception ex)
         {
             var elapsed = DateTime.Now - startTime;
-            Console.WriteLine($"[Worker {workerId}] AI request {request.RequestId} failed after {elapsed.TotalMilliseconds}ms: {ex.Message}");
+            Log($"[Worker {workerId}] AI request {request.RequestId} failed after {elapsed.TotalMilliseconds}ms: {ex.Message}");
+            OnRequestProcessed?.Invoke("AI_MOVE_REQUEST", elapsed.TotalMilliseconds, false);
             return CreateErrorResponse(request.RequestId, $"AI processing error: {ex.Message}");
         }
     }
 
     private async Task<WorkerResponse> ProcessMoveValidationRequest(WorkerRequest request)
     {
+        var startTime = DateTime.Now;
         try
         {
             var validationRequest = JsonSerializer.Deserialize<MoveValidationRequest>(request.Data);
             if (validationRequest == null)
             {
+                OnRequestProcessed?.Invoke("VALIDATE_MOVE_REQUEST", (DateTime.Now - startTime).TotalMilliseconds, false);
                 return CreateErrorResponse(request.RequestId, "Invalid validation request data");
             }
 
@@ -340,6 +366,9 @@ public class WorkerServer
                 validationResponse.ErrorMessage = "Invalid move: position is occupied or out of bounds";
             }
 
+            var elapsed = DateTime.Now - startTime;
+            OnRequestProcessed?.Invoke("VALIDATE_MOVE_REQUEST", elapsed.TotalMilliseconds, true);
+
             return new WorkerResponse
             {
                 RequestId = request.RequestId,
@@ -350,6 +379,8 @@ public class WorkerServer
         }
         catch (Exception ex)
         {
+            var elapsed = DateTime.Now - startTime;
+            OnRequestProcessed?.Invoke("VALIDATE_MOVE_REQUEST", elapsed.TotalMilliseconds, false);
             return CreateErrorResponse(request.RequestId, $"Validation error: {ex.Message}");
         }
     }
@@ -370,11 +401,11 @@ public class WorkerServer
         try
         {
             await SendMessage(response);
-            Console.WriteLine($"Sent response: {response.Type} - {response.Status}");
+            Log($"Sent response: {response.Type} - {response.Status}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to send response: {ex.Message}");
+            Log($"Failed to send response: {ex.Message}");
             isConnected = false;
         }
     }
@@ -392,7 +423,7 @@ public class WorkerServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to send message: {ex.Message}");
+            Log($"Failed to send message: {ex.Message}");
             isConnected = false;
             throw;
         }
@@ -424,12 +455,14 @@ public class WorkerServer
 
     public void Stop()
     {
-        Console.WriteLine($"Worker {workerId} stopping...");
+        Log($"Worker {workerId} stopping...");
         isRunning = false;
         isConnected = false;
         isRegistered = false;
+        OnConnectionChanged?.Invoke(false, "");
+        OnRegistrationChanged?.Invoke(false, workerId);
         stream?.Close();
         tcpClient?.Close();
-        Console.WriteLine($"Worker {workerId} stopped");
+        Log($"Worker {workerId} stopped");
     }
 }

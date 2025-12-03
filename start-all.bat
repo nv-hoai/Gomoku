@@ -1,29 +1,31 @@
 @echo off
-title Start All - Gomoku Distributed System
+title Auto Start - Gomoku Servers
 echo ================================
-echo Gomoku Distributed System Launcher
+echo Gomoku Auto-Start (Optimized)
 echo ================================
-echo This will start:
-echo 1. MainServer (Game Server)
-echo 2. WorkerServer (AI Worker)
+echo Starting servers in optimal order...
 echo.
-echo Make sure to start MainServer FIRST!
-echo ================================
-pause
 
-echo Starting MainServer...
-start "MainServer" "%~dp0run-server.bat"
+REM Start Worker GUI (background, no CMD window)
+echo [1/2] Starting Worker Server GUI...
+cd /d "%~dp0WorkerServer"
+start /B "" dotnet run
+cd /d "%~dp0"
 
-echo Waiting 3 seconds for MainServer to initialize...
-timeout /t 3 /nobreak > nul
+REM Wait for Worker to initialize
+echo [2/2] Waiting for Worker to initialize (2 sec)...
+timeout /t 2 /nobreak > nul
 
-echo Starting WorkerServer...
-start "WorkerServer" "%~dp0run-worker.bat"
+REM Start Main Server GUI
+echo Starting Main Server GUI...
+start "" "%~dp0run-server-gui.bat"
 
 echo.
 echo ================================
-echo Both servers are starting!
+echo Servers Started Successfully!
 echo ================================
-echo MainServer: Game clients and workers
-echo WorkerServer: AI processing
+echo Worker: Auto-starting in background
+echo MainServer: Opening GUI...
+echo ================================
 echo.
+exit
